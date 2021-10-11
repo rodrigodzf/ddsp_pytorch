@@ -44,9 +44,14 @@ class DDSP(nn.Module):
         self.register_buffer("sampling_rate", torch.tensor(sampling_rate))
         self.register_buffer("block_size", torch.tensor(block_size))
 
-        self.in_mlps = nn.ModuleList([get_mlp(1, hidden_size, 3)] * 2) # Generate 2 MLPs of size: in_size: 1 ; n_layers = 3
-        self.gru = get_gru(2, hidden_size) #GRU: input_size = 2 * hidden_size ; n_layers = 1 (that's the default config)
-        self.out_mlp = get_mlp(hidden_size + 2, hidden_size, 3) #MLP: in_size: 1 ; n_layers = 3
+        # Generate 2 MLPs of size: in_size: 1 ; n_layers = 3 (with layer normalization and leaky relu)
+        self.in_mlps = nn.ModuleList([get_mlp(1, hidden_size, 3)] * 2)
+        
+        #Generate GRU: input_size = 2 * hidden_size ; n_layers = 1 (that's the default config)
+        self.gru = get_gru(2, hidden_size)
+        
+        #Generate output MLP: in_size: hidden_size + 2 ; n_layers = 3
+        self.out_mlp = get_mlp(hidden_size + 2, hidden_size, 3)
 
         self.proj_matrices = nn.ModuleList([
             nn.Linear(hidden_size, n_harmonic + 1),
@@ -59,18 +64,26 @@ class DDSP(nn.Module):
         self.register_buffer("phase", torch.zeros(1))
 
     def forward(self, pitch, loudness):
+        # Run pitch and loudness inputs through the respectives input MLPs.
+        # Then, concatenate the outputs in a 1024 flat vector.
         hidden = torch.cat([
             self.in_mlps[0](pitch),
             self.in_mlps[1](loudness),
         ], -1)
+        # Run the 1024 flattened vector through the GRU.
+        # The GRU predicts the embedding for each 1024 sample.
+        # Then, concatenate the embedding with the disentangled parameters of pitch and loudness (514 size vector)
         hidden = torch.cat([self.gru(hidden)[0], pitch, loudness], -1)
+        # Run the embedding through the output MLP to obtain a 512-sized output vector.
         hidden = self.out_mlp(hidden)
-
+        
         # harmonic part
+        # Run embedding through a projection_matrix Perceptron to get a distribution of harmonics + total amplitude
         param = scale_function(self.proj_matrices[0](hidden))
 
         total_amp = param[..., :1]
         amplitudes = param[..., 1:]
+
 
         amplitudes = remove_above_nyquist(
             amplitudes,
@@ -86,6 +99,7 @@ class DDSP(nn.Module):
         harmonic = harmonic_synth(pitch, amplitudes, self.sampling_rate)
 
         # noise part
+        # Run hidden state through another projection_matrix Perceptron to get estimated noise filter response.
         param = scale_function(self.proj_matrices[1](hidden) - 5)
 
         impulse = amp_to_impulse_response(param, self.block_size)
