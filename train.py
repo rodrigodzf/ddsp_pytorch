@@ -32,7 +32,7 @@ with open(args.CONFIG, "r") as config:
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 model = DDSP(**config["model"]).to(device)
-
+print("Generated model: \n {}".format(model))
 dataset = Dataset(config["preprocess"]["out_dir"])
 
 dataloader = torch.utils.data.DataLoader(

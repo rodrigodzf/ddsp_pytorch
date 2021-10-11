@@ -118,7 +118,7 @@ def extract_pitch(signal, sampling_rate, block_size):
     return f0
 
 
-def mlp(in_size, hidden_size, n_layers):
+def get_mlp(in_size, hidden_size, n_layers):
     channels = [in_size] + (n_layers) * [hidden_size]
     net = []
     for i in range(n_layers):
@@ -128,7 +128,7 @@ def mlp(in_size, hidden_size, n_layers):
     return nn.Sequential(*net)
 
 
-def gru(n_input, hidden_size):
+def get_gru(n_input, hidden_size):
     return nn.GRU(n_input * hidden_size, hidden_size, batch_first=True)
 
 

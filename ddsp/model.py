@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from .core import mlp, gru, scale_function, remove_above_nyquist, upsample
+from .core import get_mlp, get_gru, scale_function, remove_above_nyquist, upsample
 from .core import harmonic_synth, amp_to_impulse_response, fft_convolve
 from .core import resample
 import math
@@ -44,9 +44,9 @@ class DDSP(nn.Module):
         self.register_buffer("sampling_rate", torch.tensor(sampling_rate))
         self.register_buffer("block_size", torch.tensor(block_size))
 
-        self.in_mlps = nn.ModuleList([mlp(1, hidden_size, 3)] * 2)
-        self.gru = gru(2, hidden_size)
-        self.out_mlp = mlp(hidden_size + 2, hidden_size, 3)
+        self.in_mlps = nn.ModuleList([get_mlp(1, hidden_size, 3)] * 2) # Generate 2 MLPs of size: in_size: 1 ; n_layers = 3
+        self.gru = get_gru(2, hidden_size) #GRU: input_size = 2 * hidden_size ; n_layers = 1 (that's the default config)
+        self.out_mlp = get_mlp(hidden_size + 2, hidden_size, 3) #MLP: in_size: 1 ; n_layers = 3
 
         self.proj_matrices = nn.ModuleList([
             nn.Linear(hidden_size, n_harmonic + 1),
