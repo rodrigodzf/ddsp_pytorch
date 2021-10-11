@@ -16,16 +16,18 @@ def get_files(data_location, extension, **kwargs):
 
 
 def preprocess(f, sampling_rate, block_size, signal_length, oneshot, **kwargs):
+    # Load file and pad it.
     x, sr = li.load(f, sampling_rate)
     N = (signal_length - len(x) % signal_length) % signal_length
-    x = np.pad(x, (0, N))
+    x = np.pad(x, (0, N)) #pad only the end of the array.
 
     if oneshot:
         x = x[..., :signal_length]
 
     pitch = extract_pitch(x, sampling_rate, block_size)
     loudness = extract_loudness(x, sampling_rate, block_size)
-
+    
+    # reshape x to keep signal_length in the last dimension.
     x = x.reshape(-1, signal_length)
     pitch = pitch.reshape(x.shape[0], -1)
     loudness = loudness.reshape(x.shape[0], -1)
@@ -72,6 +74,7 @@ def main():
         pitchs.append(p)
         loudness.append(l)
 
+    # Concatenate all signals
     signals = np.concatenate(signals, 0).astype(np.float32)
     pitchs = np.concatenate(pitchs, 0).astype(np.float32)
     loudness = np.concatenate(loudness, 0).astype(np.float32)
