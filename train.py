@@ -1,7 +1,7 @@
 import torch
 from torch.utils.tensorboard import SummaryWriter
 import yaml
-from ddsp.model import DDSP
+from ddsp.model import DDSP, DDSP_noseq
 from effortless_config import Config
 from os import path
 from preprocess import Dataset

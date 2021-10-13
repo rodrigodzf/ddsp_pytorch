@@ -174,3 +174,142 @@ class DDSP(nn.Module):
         signal = harmonic + noise
 
         return signal
+
+
+class DDSP_noseq(nn.Module):
+    def __init__(self, hidden_size, n_harmonic, n_bands, sampling_rate,
+                 block_size):
+        super().__init__()
+        self.register_buffer("sampling_rate", torch.tensor(sampling_rate))
+        self.register_buffer("block_size", torch.tensor(block_size))
+
+        # Generate 2 MLPs of size: in_size: 1 ; n_layers = 3 (with layer normalization and leaky relu)
+        self.in_mlps = nn.ModuleList([get_mlp(1, hidden_size, 3)] * 2)
+        
+        #Generate GRU: input_size = 2 * hidden_size ; n_layers = 1 (that's the default config)
+        self.gru = get_mlp(hidden_size *2, hidden_size, 3)
+        
+        #Generate output MLP: in_size: hidden_size + 2 ; n_layers = 3
+        self.out_mlp = get_mlp(hidden_size + 2, hidden_size, 3)
+
+        self.proj_matrices = nn.ModuleList([
+            nn.Linear(hidden_size, n_harmonic + 1),
+            nn.Linear(hidden_size, n_bands),
+        ])
+
+        self.reverb = Reverb(sampling_rate, sampling_rate)
+
+        self.register_buffer("cache_gru", torch.zeros(1, 1, hidden_size))
+        self.register_buffer("phase", torch.zeros(1))
+
+    def forward(self, pitch, loudness):
+        # Run pitch and loudness inputs through the respectives input MLPs.
+        # Then, concatenate the outputs in a 1024 flat vector.
+        hidden = torch.cat([
+            self.in_mlps[0](pitch),
+            self.in_mlps[1](loudness),
+        ], -1)
+        # Run the 1024 flattened vector through the GRU.
+        # The GRU predicts the embedding for each 1024 sample.
+        # Then, concatenate the embedding with the disentangled parameters of pitch and loudness (514 size vector)
+        hidden = torch.cat([self.gru(hidden)[0], pitch, loudness], -1)
+        # Run the embedding through the output MLP to obtain a 512-sized output vector.
+        hidden = self.out_mlp(hidden)
+        
+        # harmonic part
+        # Run embedding through a projection_matrix Perceptron to get a distribution of harmonics + total amplitude
+        param = scale_function(self.proj_matrices[0](hidden))
+
+        total_amp = param[..., :1]
+        amplitudes = param[..., 1:]
+
+
+        amplitudes = remove_above_nyquist(
+            amplitudes,
+            pitch,
+            self.sampling_rate,
+        )
+        amplitudes /= amplitudes.sum(-1, keepdim=True)
+        amplitudes *= total_amp
+
+        amplitudes = upsample(amplitudes, self.block_size)
+        pitch = upsample(pitch, self.block_size)
+
+        harmonic = harmonic_synth(pitch, amplitudes, self.sampling_rate)
+
+        # noise part
+        # Run hidden state through another projection_matrix Perceptron to get estimated noise filter response.
+        param = scale_function(self.proj_matrices[1](hidden) - 5)
+
+        impulse = amp_to_impulse_response(param, self.block_size)
+        noise = torch.rand(
+            impulse.shape[0],
+            impulse.shape[1],
+            self.block_size,
+        ).to(impulse) * 2 - 1
+
+        noise = fft_convolve(noise, impulse).contiguous()
+        noise = noise.reshape(noise.shape[0], -1, 1)
+
+        signal = harmonic + noise
+
+        #reverb part
+        signal = self.reverb(signal)
+
+        return signal
+
+    def realtime_forward(self, pitch, loudness):
+        hidden = torch.cat([
+            self.in_mlps[0](pitch),
+            self.in_mlps[1](loudness),
+        ], -1)
+
+        gru_out, cache = self.gru(hidden, self.cache_gru)
+        self.cache_gru.copy_(cache)
+
+        hidden = torch.cat([gru_out, pitch, loudness], -1)
+        hidden = self.out_mlp(hidden)
+
+        # harmonic part
+        param = scale_function(self.proj_matrices[0](hidden))
+
+        total_amp = param[..., :1]
+        amplitudes = param[..., 1:]
+
+        amplitudes = remove_above_nyquist(
+            amplitudes,
+            pitch,
+            self.sampling_rate,
+        )
+        amplitudes /= amplitudes.sum(-1, keepdim=True)
+        amplitudes *= total_amp
+
+        amplitudes = upsample(amplitudes, self.block_size)
+        pitch = upsample(pitch, self.block_size)
+
+        n_harmonic = amplitudes.shape[-1]
+        omega = torch.cumsum(2 * math.pi * pitch / self.sampling_rate, 1)
+
+        omega = omega + self.phase
+        self.phase.copy_(omega[0, -1, 0] % (2 * math.pi))
+
+        omegas = omega * torch.arange(1, n_harmonic + 1).to(omega)
+
+        harmonic = (torch.sin(omegas) * amplitudes).sum(-1, keepdim=True)
+
+        # noise part
+        param = scale_function(self.proj_matrices[1](hidden) - 5)
+
+        impulse = amp_to_impulse_response(param, self.block_size)
+        noise = torch.rand(
+            impulse.shape[0],
+            impulse.shape[1],
+            self.block_size,
+        ).to(impulse) * 2 - 1
+
+        noise = fft_convolve(noise, impulse).contiguous()
+        noise = noise.reshape(noise.shape[0], -1, 1)
+
+        signal = harmonic + noise
+
+        return signal
