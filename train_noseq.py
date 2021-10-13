@@ -1,7 +1,7 @@
 import torch
 from torch.utils.tensorboard import SummaryWriter
 import yaml
-from ddsp.model import DDSP
+from ddsp.model import DDSP, DDSP_nonseq
 from effortless_config import Config
 from os import path
 from preprocess import Dataset
@@ -31,7 +31,7 @@ with open(args.CONFIG, "r") as config:
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-model = DDSP(**config["model"]).to(device)
+model = DDSP_nonseq(**config["model"]).to(device)
 print("Generated model: \n {}".format(model))
 dataset = Dataset(config["preprocess"]["out_dir"])
 
