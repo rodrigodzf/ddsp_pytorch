@@ -212,7 +212,7 @@ class DDSP_noseq(nn.Module):
         # Run the 1024 flattened vector through the GRU.
         # The GRU predicts the embedding for each 1024 sample.
         # Then, concatenate the embedding with the disentangled parameters of pitch and loudness (514 size vector)
-        hidden = torch.cat([self.gru(hidden)[0], pitch, loudness], -1)
+        hidden = torch.cat([self.gru(hidden), pitch, loudness], -1)
         # Run the embedding through the output MLP to obtain a 512-sized output vector.
         hidden = self.out_mlp(hidden)
         
