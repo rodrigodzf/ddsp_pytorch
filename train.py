@@ -31,7 +31,7 @@ with open(args.CONFIG, "r") as config:
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-if config["model"]["sequential"] == "yes":
+if config["train"]["sequential"] == True:
     model = DDSP(**config["model"]).to(device)
 else:
     model = DDSP_noseq(**config["model"]).to(device)
