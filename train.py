@@ -22,6 +22,7 @@ class args(Config):
     START_LR = 1e-3
     STOP_LR = 1e-4
     DECAY_OVER = 400000
+    MODE = "train"
 
 
 args.parse_args()
@@ -66,71 +67,74 @@ schedule = get_scheduler(
 
 # scheduler = torch.optim.lr_scheduler.LambdaLR(opt, schedule)
 
-best_loss = float("inf")
-mean_loss = 0
-n_element = 0
-step = 0
 epochs = int(np.ceil(args.STEPS / len(dataloader)))
+train(model,epochs,dataloader,writer,opt)
 
-# tqdm is a loading bar
-for e in tqdm(range(epochs)):
-    # sound pitch loudness
-    for s, p, l in dataloader:
-        s = s.to(device)
-        p = p.unsqueeze(-1).to(device)
-        l = l.unsqueeze(-1).to(device)
-        # s torch.Size([16, 64000]) - p torch.Size([16, 400, 1]) - l torch.Size([16, 400, 1])
-        l = (l - mean_loudness) / std_loudness
 
-        y = model(p, l).squeeze(-1)
+def train(model,epochs,dataloader,writer,opt):
+    best_loss = float("inf")
+    mean_loss = 0
+    n_element = 0
+    step = 0
+    # tqdm is a loading bar
+    for e in tqdm(range(epochs)):
+        # sound pitch loudness
+        for s, p, l in dataloader:
+            s = s.to(device)
+            p = p.unsqueeze(-1).to(device)
+            l = l.unsqueeze(-1).to(device)
+            # s torch.Size([16, 64000]) - p torch.Size([16, 400, 1]) - l torch.Size([16, 400, 1])
+            l = (l - mean_loudness) / std_loudness
 
-        ori_stft = multiscale_fft(
-            s,
-            config["train"]["scales"],
-            config["train"]["overlap"],
-        )
-        rec_stft = multiscale_fft(
-            y,
-            config["train"]["scales"],
-            config["train"]["overlap"],
-        )
+            y = model(p, l).squeeze(-1)
 
-        loss = 0
-        for s_x, s_y in zip(ori_stft, rec_stft):
-            lin_loss = (s_x - s_y).abs().mean()
-            log_loss = (safe_log(s_x) - safe_log(s_y)).abs().mean()
-            loss = loss + lin_loss + log_loss
-
-        opt.zero_grad()
-        loss.backward()
-        opt.step()
-
-        writer.add_scalar("loss", loss.item(), step)
-
-        step += 1
-
-        n_element += 1
-        mean_loss += (loss.item() - mean_loss) / n_element
-
-    if not e % 10:
-        writer.add_scalar("lr", schedule(e), e)
-        writer.add_scalar("reverb_decay", model.reverb.decay.item(), e)
-        writer.add_scalar("reverb_wet", model.reverb.wet.item(), e)
-        # scheduler.step()
-        if mean_loss < best_loss:
-            best_loss = mean_loss
-            torch.save(
-                model.state_dict(),
-                path.join(args.ROOT, args.NAME, "state.pth"),
+            ori_stft = multiscale_fft(
+                s,
+                config["train"]["scales"],
+                config["train"]["overlap"],
+            )
+            rec_stft = multiscale_fft(
+                y,
+                config["train"]["scales"],
+                config["train"]["overlap"],
             )
 
-        mean_loss = 0
-        n_element = 0
+            loss = 0
+            for s_x, s_y in zip(ori_stft, rec_stft):
+                lin_loss = (s_x - s_y).abs().mean()
+                log_loss = (safe_log(s_x) - safe_log(s_y)).abs().mean()
+                loss = loss + lin_loss + log_loss
 
-        audio = torch.cat([s, y], -1).reshape(-1).detach().cpu().numpy()
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
 
-        sf.write(
-            path.join(args.ROOT, args.NAME, f"eval_{e:06d}.wav"),
-            audio,
-            config["preprocess"]["sampling_rate"],
-        )
+            writer.add_scalar("loss", loss.item(), step)
+
+            step += 1
+
+            n_element += 1
+            mean_loss += (loss.item() - mean_loss) / n_element
+
+        if not e % 10:
+            writer.add_scalar("lr", schedule(e), e)
+            writer.add_scalar("reverb_decay", model.reverb.decay.item(), e)
+            writer.add_scalar("reverb_wet", model.reverb.wet.item(), e)
+            # scheduler.step()
+            if mean_loss < best_loss:
+                best_loss = mean_loss
+                torch.save(
+                    model.state_dict(),
+                    path.join(args.ROOT, args.NAME, "state.pth"),
+                )
+
+            mean_loss = 0
+            n_element = 0
+
+            audio = torch.cat([s, y], -1).reshape(-1).detach().cpu().numpy()
+
+            sf.write(
+                path.join(args.ROOT, args.NAME, f"eval_{e:06d}.wav"),
+                audio,
+                config["preprocess"]["sampling_rate"],
+            )
