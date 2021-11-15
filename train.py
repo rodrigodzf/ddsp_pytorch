@@ -13,64 +13,6 @@ from ddsp.utils import get_scheduler
 import numpy as np
 
 
-class args(Config):
-    CONFIG = "config.yaml"
-    NAME = "debug"
-    ROOT = "runs"
-    STEPS = 500000
-    BATCH = 16
-    START_LR = 1e-3
-    STOP_LR = 1e-4
-    DECAY_OVER = 400000
-    MODE = "train"
-
-
-args.parse_args()
-
-with open(args.CONFIG, "r") as config:
-    config = yaml.safe_load(config)
-
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-if config["train"]["sequential"] == True:
-    model = DDSP(**config["model"]).to(device)
-else:
-    model = DDSP_noseq(**config["model"]).to(device)
-
-print("Called model: \n {}".format(model))
-dataset = Dataset(config["preprocess"]["out_dir"])
-
-dataloader = torch.utils.data.DataLoader(
-    dataset,
-    args.BATCH,
-    True,
-    drop_last=True,
-)
-
-mean_loudness, std_loudness = mean_std_loudness(dataloader)
-config["data"]["mean_loudness"] = mean_loudness
-config["data"]["std_loudness"] = std_loudness
-
-writer = SummaryWriter(path.join(args.ROOT, args.NAME), flush_secs=20)
-
-with open(path.join(args.ROOT, args.NAME, "config.yaml"), "w") as out_config:
-    yaml.safe_dump(config, out_config)
-
-opt = torch.optim.Adam(model.parameters(), lr=args.START_LR)
-
-schedule = get_scheduler(
-    len(dataloader),
-    args.START_LR,
-    args.STOP_LR,
-    args.DECAY_OVER,
-)
-
-# scheduler = torch.optim.lr_scheduler.LambdaLR(opt, schedule)
-
-epochs = int(np.ceil(args.STEPS / len(dataloader)))
-train(model,epochs,dataloader,writer,opt)
-
-
 def train(model,epochs,dataloader,writer,opt):
     best_loss = float("inf")
     mean_loss = 0
@@ -86,7 +28,8 @@ def train(model,epochs,dataloader,writer,opt):
             # s torch.Size([16, 64000]) - p torch.Size([16, 400, 1]) - l torch.Size([16, 400, 1])
             l = (l - mean_loudness) / std_loudness
 
-            y = model(p, l).squeeze(-1)
+            y,h,n = model(p, l)
+            y = y.squeeze(-1)
 
             ori_stft = multiscale_fft(
                 s,
@@ -138,3 +81,121 @@ def train(model,epochs,dataloader,writer,opt):
                 audio,
                 config["preprocess"]["sampling_rate"],
             )
+
+
+def test(model,dataloader):
+    best_loss = float("inf")
+    mean_loss = 0
+    n_element = 0
+    
+    model.load_state_dict(torch.load(path.join(args.ROOT, args.NAME, "state.pth")))
+    model.eval()
+    # sound pitch loudness
+    for s, p, l in dataloader:
+        with torch.no_grad():
+            s = s.to(device)
+            p = p.unsqueeze(-1).to(device)
+            l = l.unsqueeze(-1).to(device)
+            # s torch.Size([16, 64000]) - p torch.Size([16, 400, 1]) - l torch.Size([16, 400, 1])
+            l = (l - mean_loudness) / std_loudness
+
+            y,h,n = model(p, l)
+            y = y.squeeze(-1)
+            h = h.squeeze(-1)
+            n = n.squeeze(-1)
+
+            n_element += 1
+
+            
+            ref = s.reshape(-1).detach().cpu().numpy()
+            synth = y.reshape(-1).detach().cpu().numpy()
+            harmonic = h.reshape(-1).detach().cpu().numpy()
+            noise = n.reshape(-1).detach().cpu().numpy()
+
+            sf.write(
+                path.join(args.ROOT, args.NAME, f"test_ref.wav"),
+                ref,
+                config["preprocess"]["sampling_rate"],
+            )
+            sf.write(
+                path.join(args.ROOT, args.NAME, f"test_synth.wav"),
+                synth,
+                config["preprocess"]["sampling_rate"],
+            )
+            sf.write(
+                path.join(args.ROOT, args.NAME, f"test_synth_harmonic.wav"),
+                harmonic,
+                config["preprocess"]["sampling_rate"],
+            )
+            sf.write(
+                path.join(args.ROOT, args.NAME, f"test_synth_noise.wav"),
+                noise,
+                config["preprocess"]["sampling_rate"],
+            )
+        break
+
+class args(Config):
+    CONFIG = "config.yaml"
+    NAME = "debug"
+    ROOT = "runs"
+    STEPS = 500000
+    BATCH = 16
+    START_LR = 1e-3
+    STOP_LR = 1e-4
+    DECAY_OVER = 400000
+    MODE = "train"
+
+
+args.parse_args()
+
+with open(args.CONFIG, "r") as config:
+    config = yaml.safe_load(config)
+
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+if config["train"]["sequential"] == True:
+    model = DDSP(**config["model"]).to(device)
+else:
+    model = DDSP_noseq(**config["model"]).to(device)
+
+print("Called model: \n {}".format(model))
+dataset = Dataset(config["preprocess"]["out_dir"])
+
+if args.MODE == "train":
+    shuffle = True
+else:
+    shuffle = False
+
+dataloader = torch.utils.data.DataLoader(
+    dataset,
+    args.BATCH,
+    shuffle,
+    drop_last=True,
+)
+
+mean_loudness, std_loudness = mean_std_loudness(dataloader)
+config["data"]["mean_loudness"] = mean_loudness
+config["data"]["std_loudness"] = std_loudness
+
+writer = SummaryWriter(path.join(args.ROOT, args.NAME), flush_secs=20)
+
+with open(path.join(args.ROOT, args.NAME, "config.yaml"), "w") as out_config:
+    yaml.safe_dump(config, out_config)
+
+opt = torch.optim.Adam(model.parameters(), lr=args.START_LR)
+
+schedule = get_scheduler(
+    len(dataloader),
+    args.START_LR,
+    args.STOP_LR,
+    args.DECAY_OVER,
+)
+
+# scheduler = torch.optim.lr_scheduler.LambdaLR(opt, schedule)
+
+epochs = int(np.ceil(args.STEPS / len(dataloader)))
+
+if args.MODE == "train":
+    train(model,epochs,dataloader,writer,opt)
+else:
+    test(model,dataloader)
