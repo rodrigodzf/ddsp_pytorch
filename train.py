@@ -31,8 +31,12 @@ with open(args.CONFIG, "r") as config:
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-model = DDSP(**config["model"]).to(device)
-print("Generated model: \n {}".format(model))
+if config["model"]["sequential"] == "yes":
+    model = DDSP(**config["model"]).to(device)
+else:
+    model = DDSP_noseq(**config["model"]).to(device)
+
+print("Called model: \n {}".format(model))
 dataset = Dataset(config["preprocess"]["out_dir"])
 
 dataloader = torch.utils.data.DataLoader(
@@ -68,12 +72,14 @@ n_element = 0
 step = 0
 epochs = int(np.ceil(args.STEPS / len(dataloader)))
 
+# tqdm is a loading bar
 for e in tqdm(range(epochs)):
+    # sound pitch loudness
     for s, p, l in dataloader:
         s = s.to(device)
         p = p.unsqueeze(-1).to(device)
         l = l.unsqueeze(-1).to(device)
-
+        # s torch.Size([16, 64000]) - p torch.Size([16, 400, 1]) - l torch.Size([16, 400, 1])
         l = (l - mean_loudness) / std_loudness
 
         y = model(p, l).squeeze(-1)
