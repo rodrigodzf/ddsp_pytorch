@@ -15,16 +15,14 @@ def get_files(data_location, extension, **kwargs):
     return list(pathlib.Path(data_location).rglob(f"*.{extension}"))
 
 
-def preprocess(f, sampling_rate, block_size, signal_length, oneshot, **kwargs):
-    # Load file and pad it.
-    x, sr = li.load(f, sampling_rate)
+def preprocess(x, sampling_rate, block_size, signal_length, oneshot, model_capacity='full',**kwargs):
     N = (signal_length - len(x) % signal_length) % signal_length
     x = np.pad(x, (0, N)) #pad only the end of the array.
 
     if oneshot:
         x = x[..., :signal_length]
 
-    pitch = extract_pitch(x, sampling_rate, block_size)
+    pitch, _ = extract_pitch(x, sampling_rate, block_size, model_capacity=model_capacity)
     loudness = extract_loudness(x, sampling_rate, block_size)
     
     # reshape x to keep signal_length in the last dimension.
@@ -69,7 +67,8 @@ def main():
 
     for f in pb:
         pb.set_description(str(f))
-        x, p, l = preprocess(f, **config["preprocess"])
+        x, _ = li.load(f, **config["preprocess"]["sampling_rate"])
+        x, p, l = preprocess(x, **config["preprocess"])
         signals.append(x)
         pitchs.append(p)
         loudness.append(l)
