@@ -100,7 +100,7 @@ if __name__ == '__main__':
         l = loudness.unsqueeze(-1).to(device)
         l = (l - mean_loudness) / std_loudness
 
-        y = ddsp(p, l)
+        y, _, _ = ddsp(p, l)
 
         y = y.reshape(-1).cpu().numpy()
         gen_pitch, gen_confidence = extract_pitch(y, sampling_rate, block_size, model_capacity)
@@ -115,7 +115,7 @@ if __name__ == '__main__':
         gen_pitch_midi = li.core.hz_to_midi(gen_pitch)
 
         pitch_l1 = np.abs(gen_pitch_midi - gt_pitch_midi).mean()
-        loudness_l1 = l1_loss(torch.from_numpy(gen_loudness.astype(np.float32)), loudness.reshape(-1))
+        loudness_l1 = np.abs(torch.from_numpy(gen_loudness.astype(np.float32)) - loudness.reshape(-1)).mean()
 
         print(f'Loudness L1 {loudness_l1}')
         print(f'Pitch L1 {pitch_l1}')
