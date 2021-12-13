@@ -96,7 +96,7 @@ def extract_loudness(signal, sampling_rate, block_size, n_fft=2048):
     return S
 
 
-def extract_pitch(signal, sampling_rate, block_size):
+def extract_pitch(signal, sampling_rate, block_size, model_capacity='full'):
     length = signal.shape[-1] // block_size
     f0 = crepe.predict(
         signal,
@@ -104,8 +104,10 @@ def extract_pitch(signal, sampling_rate, block_size):
         step_size=int(1000 * block_size / sampling_rate),
         verbose=1,
         center=True,
+        model_capacity=model_capacity,
         viterbi=True,
     )
+    confidence = f0[2].reshape(-1)[:-1]
     f0 = f0[1].reshape(-1)[:-1]
 
     if f0.shape[-1] != length:
@@ -115,7 +117,7 @@ def extract_pitch(signal, sampling_rate, block_size):
             f0,
         )
 
-    return f0
+    return f0, confidence
 
 
 def get_mlp(in_size, hidden_size, n_layers):
