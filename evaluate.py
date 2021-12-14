@@ -2,13 +2,14 @@ import torch
 import yaml
 from argparse import ArgumentParser
 from pathlib import Path
-from ddsp.model import DDSP
+from ddsp.model import DDSP, DDSP_noseq
 from ddsp.core import extract_loudness, extract_pitch
 from preprocess import preprocess
 import numpy as np
 import librosa as li
 from torch.nn.functional import l1_loss
 import soundfile as sf
+import matplotlib.pyplot as plt
 # import torchaudio
 # import torchcrepe
 
@@ -32,6 +33,38 @@ import soundfile as sf
 #                            device='cpu')
 #     loudness = extract_loudness(audio, sampling_rate, block_size)
 #     return audio, pitch, loudness
+
+def make_plots(gt_pitch_midi, gen_pitch_midi, loudness, gen_loudness):
+    fig, ax = plt.subplots(3,1)
+    ax[0].plot(gen_pitch_midi)
+    ax[1].plot(gt_pitch_midi)
+    ax[2].plot(np.abs(gen_pitch_midi - gt_pitch_midi))
+
+    for a in ax:
+        a.set_xlabel('Frame')
+        a.set_ylabel('Semitones')
+        a.grid()
+
+    plt.tight_layout()
+    plt.savefig('eval_pitch.png')
+
+    fig, ax = plt.subplots(3,1)
+    ax[0].plot(gen_loudness)
+    ax[1].plot(loudness)
+    ax[2].plot(np.abs(gen_loudness - loudness))
+
+    ax[2].set_xlabel('Frame')
+    ax[2].set_ylabel('Difference')
+    ax[2].grid()
+
+    for a in ax[:2]:
+        a.set_xlabel('Frame')
+        a.set_ylabel('Loudness')
+        a.grid()
+    plt.tight_layout()
+    plt.savefig('eval_loudness.png')
+
+    # %%
 
 if __name__ == '__main__':
     parser = ArgumentParser(description='DDSP graphs')
@@ -98,7 +131,7 @@ if __name__ == '__main__':
         std_loudness = loudness.std()
         p = pitchs.unsqueeze(-1).to(device)
         l = loudness.unsqueeze(-1).to(device)
-        l = (l - mean_loudness) / std_loudness
+        l = (l - config["data"]["mean_loudness"]) / config["data"]["std_loudness"]
 
         y, _, _ = ddsp(p, l)
 
@@ -117,6 +150,7 @@ if __name__ == '__main__':
         pitch_l1 = np.abs(gen_pitch_midi - gt_pitch_midi).mean()
         loudness_l1 = np.abs(torch.from_numpy(gen_loudness.astype(np.float32)) - loudness.reshape(-1)).mean()
 
+        make_plots(gt_pitch_midi, gen_pitch_midi, loudness.reshape(-1).numpy(), gen_loudness)
         print(f'Loudness L1 {loudness_l1}')
         print(f'Pitch L1 {pitch_l1}')
 
